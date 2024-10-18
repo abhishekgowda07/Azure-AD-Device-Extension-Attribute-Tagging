@@ -1,0 +1,102 @@
+Import-Module Microsoft.Graph.Authentication
+Import-Module Microsoft.Graph.Identity.DirectoryManagement
+Connect-MgGraph -Scopes "Directory.AccessAsUser.All"
+Select-MgProfile Beta
+Connect-AzureAD
+ 
+$Dev=Import-Csv -Path 'C:\Temp\ClientsforAttribTag1 - Copy.csv' #Path of List Of Groups .csv
+$Devices1_=$Dev.ObjectId
+ForEach($Devices1 in $Devices1_){
+$stopwatch=New-Object -TypeName System.Diagnostics.Stopwatch
+$stopwatch.Start()
+$Results = @()
+$NoDev=@()  
+$time=@()
+ 
+Write-Host("The Total Number of users in the Group :")
+$users=ForEach($id in $Devices1){
+$pn=Get-AzureADGroup -ObjectId $id
+Get-AzureADGroupMember -ObjectId $id -All $true | Where-Object {$_.AccountEnabled -eq $true}
+Write-Host($pn.DisplayName)}
+Write-Host("is",$users.Count)
+#$users=$users | select -Unique
+$Devices=ForEach($ids in $users.ObjectId){
+if(Get-AzureADUserRegisteredDevice -ObjectId $ids){
+Get-AzureADUserRegisteredDevice -ObjectId $ids -All $true}
+else
+{
+$us=Get-AzureADUser -ObjectId $ids
+$Prop = @{
+   UserName=$us.DisplayName
+  Object_Id=$us.ObjectId
+  UPN=$us.UserPrincipalName
+   }
+   $NoDev += New-Object psobject -Property $Prop
+Write-Host("No Devices owned by",$us.DisplayName)
+}}
+ForEach($Device in $Devices){
+  $user=Get-AzureADDeviceRegisteredUser -ObjectId $Device.ObjectId
+  $UserId=$user.ObjectId
+  if($UserId){
+  $mgu=(Get-MgUser -UserId $UserId).OnPremisesExtensionAttributes.ExtensionAttribute13}
+  If ($user) {
+   $Properties = @{
+   DeviceName=$Device.DisplayName
+   UserName=$user.DisplayName
+  UPN=$user.UserPrincipalName
+   }
+if($user.Country -ne $null)
+{
+$ex10=$user.Country
+$ex13=$mgu.ToString()
+   $Results += New-Object psobject -Property $Properties
+         Write-Host ("Device {0} owned by {1}" -f $Device.DisplayName, $user.DisplayName)
+            $Attributes = @{
+           "extensionAttributes" = @{
+           "extensionAttribute10"= $ex10
+           "extensionAttribute13" = $ex13 }
+         }  | ConvertTo-Json
+      Update-MgDevice -DeviceId $Device.ObjectId -BodyParameter $Attributes 
+}
+else
+{
+$ex13=$mgu.ToString()
+   $Results += New-Object psobject -Property $Properties
+         Write-Host ("Device {0} owned by {1}" -f $Device.DisplayName, $user.DisplayName)
+            $Attributes = @{
+           "extensionAttributes" = @{
+           "extensionAttribute13" = $ex13 }
+         }  | ConvertTo-Json
+      Update-MgDevice -DeviceId $Device.ObjectId -BodyParameter $Attributes 
+}}
+Else
+{ Write-Host ("Device {0} owned by unknown user {1}" -f $Device.DisplayName, $UserId ) }
+}
+$folder_name=$pn.DisplayName
+New-Item -Path "C:\temp\$folder_name" -ItemType Directory
+$Currentdt = Get-Date -Format "yyyyMMdd_HH_mm"
+$DataPath_1 = "C:\Temp\$folder_name\"+"No_Devices_Users_" + "$Currentdt.csv" 
+$DataPath_2 = "C:\Temp\$folder_name\"+"Time_Taken_" + "$Currentdt.csv" 
+$DataPath = "C:\Temp\$folder_name\"+"Devices_Tagged_" + "$Currentdt.csv"
+$Results | Select-Object DeviceName,UserName,UPN | Export-Csv -Path $DataPath -NoType
+$NoDev | Select-Object UserName,UPN,Object_Id | Export-Csv -Path $DataPath_1 -NoType
+ 
+$stopwatch.Stop()
+$swm=$stopwatch.Elapsed.Minutes
+$swh=$stopwatch.Elapsed.Hours
+$sws=$stopwatch.Elapsed.Seconds
+ 
+$swh=$swh.ToString()
+$swm=$swm.ToString()
+$sws=$sws.ToString()
+ 
+$time_str=$swh+" hrs "+$swm+" mins "+$sws+" secs"
+$pr = @{
+   GroupName=$pn.DisplayName
+   Time=$time_str.ToString()
+   }
+$time += New-Object psobject -Property $pr
+$time | Select-Object GroupName,Time | Export-Csv -Path $DataPath_2 -NoType
+Write-Host("Total time take is :{0} hrs {1} mins {2} seconds" -f $swh,$swm,$sws)
+}
+Disconnect-MgGraph
